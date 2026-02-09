@@ -1,0 +1,9 @@
+# Compiled binary
+iss-video-wallpaper
+
+# macOS
+.DS_Store
+
+# Build artifacts
+*.o
+*.dSYM/
