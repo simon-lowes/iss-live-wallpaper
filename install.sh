@@ -15,6 +15,11 @@ echo ""
 
 # --- Check dependencies ---
 echo "Checking dependencies..."
+if ! command -v brew &>/dev/null; then
+    echo "ERROR: Homebrew is required to install dependencies but was not found on PATH."
+    echo "  Install it from https://brew.sh and re-run this script."
+    exit 1
+fi
 for cmd in ffmpeg yt-dlp; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "  Missing: $cmd — installing via Homebrew..."
@@ -41,7 +46,7 @@ echo ""
 
 # --- Create directories ---
 echo "Creating directories..."
-mkdir -p "$BIN_DIR" "$DATA_DIR/loops"
+mkdir -p "$BIN_DIR" "$DATA_DIR/loops" "$AGENT_DIR"
 
 # --- Compile Swift app ---
 echo "Compiling video wallpaper app..."
@@ -110,11 +115,39 @@ echo "  Installed LaunchAgents"
 
 # --- Unload if already running, then load ---
 echo "Loading LaunchAgents..."
-launchctl bootout "gui/$UID_NUM/com.simonlowes.iss-video-wallpaper" 2>/dev/null || true
-launchctl bootout "gui/$UID_NUM/com.simonlowes.iss-capture-loop" 2>/dev/null || true
-sleep 1
-launchctl bootstrap "gui/$UID_NUM" "$AGENT_DIR/com.simonlowes.iss-video-wallpaper.plist"
-launchctl bootstrap "gui/$UID_NUM" "$AGENT_DIR/com.simonlowes.iss-capture-loop.plist"
+
+# Wait (with timeout) for a booted-out service to actually deregister before
+# bootstrapping its replacement. bootout is asynchronous, so a fixed sleep is
+# racy: if the old service is still registered, bootstrap fails with an error.
+wait_for_unload() {
+    local label="$1" i
+    for ((i = 0; i < 50; i++)); do
+        if ! launchctl print "gui/$UID_NUM/$label" &>/dev/null; then
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+# Bootstrap a plist, reporting a clear error instead of aborting opaquely.
+load_agent() {
+    local plist="$1"
+    if ! launchctl bootstrap "gui/$UID_NUM" "$plist"; then
+        echo "ERROR: failed to load LaunchAgent: $plist"
+        echo "  Try unloading any stale service first, then re-run this script:"
+        echo "    launchctl bootout gui/$UID_NUM \"$plist\""
+        exit 1
+    fi
+}
+
+for label in com.simonlowes.iss-video-wallpaper com.simonlowes.iss-capture-loop; do
+    launchctl bootout "gui/$UID_NUM/$label" 2>/dev/null || true
+    wait_for_unload "$label" || echo "  Warning: $label still appears registered; attempting to load anyway."
+done
+
+load_agent "$AGENT_DIR/com.simonlowes.iss-video-wallpaper.plist"
+load_agent "$AGENT_DIR/com.simonlowes.iss-capture-loop.plist"
 
 echo ""
 echo "Done! ISS Live Wallpaper is now running."

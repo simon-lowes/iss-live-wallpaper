@@ -88,8 +88,17 @@ class Wallpaper: NSObject, NSApplicationDelegate {
 
     func poll() {
         let mA = mtime(pathA), mB = mtime(pathB)
-        if mA > modA      { modA = mA; startPlaying(pathA, isA: true,  fade: true) }
-        else if mB > modB { modB = mB; startPlaying(pathB, isA: false, fade: true) }
+        let changedA = mA > modA, changedB = mB > modB
+        // Record both observed mtimes before acting so the branch we don't play
+        // can never be seen as "new" on a later poll and crossfaded backward.
+        modA = mA; modB = mB
+        // If both changed since the last poll (e.g. coalesced launchd runs after
+        // sleep/wake), play whichever loop is the most recently written.
+        if changedA && (!changedB || mA >= mB) {
+            startPlaying(pathA, isA: true,  fade: true)
+        } else if changedB {
+            startPlaying(pathB, isA: false, fade: true)
+        }
     }
 
     func startPlaying(_ path: String, isA: Bool, fade: Bool) {
