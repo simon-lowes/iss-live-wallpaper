@@ -2,7 +2,8 @@
 # Shared state, logging and source-selection policy for the space wallpaper.
 # Sourced by space-capture-loop.sh and space-watchdog.sh — never run directly.
 
-DATA_DIR="${HOME}/.local/share/space-wallpaper"
+# SPACE_DATA_DIR overrides the state location (used for isolated tests only).
+DATA_DIR="${SPACE_DATA_DIR:-${HOME}/.local/share/space-wallpaper}"
 LOOP_DIR="${DATA_DIR}/loops"
 STATE_DIR="${DATA_DIR}/state"
 FRAME_DIR="${DATA_DIR}/frames"
@@ -43,7 +44,11 @@ run_timeout() {
     local secs="$1"; shift
     "$@" &
     local cmd_pid=$!
-    ( sleep "$secs"; kill -TERM "$cmd_pid" 2>/dev/null; sleep 3; kill -KILL "$cmd_pid" 2>/dev/null ) &
+    # The watcher's stdio goes to /dev/null: if it inherited a pipe, as in
+    # x=$(run_timeout N cmd | ...), its orphaned `sleep` would hold the pipe
+    # open and stall the caller for the full N seconds even when cmd exits fast.
+    ( sleep "$secs"; kill -TERM "$cmd_pid" 2>/dev/null; sleep 3; kill -KILL "$cmd_pid" 2>/dev/null ) \
+        </dev/null >/dev/null 2>&1 &
     local watch_pid=$!
     local rc=0
     wait "$cmd_pid" 2>/dev/null || rc=$?

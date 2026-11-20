@@ -45,15 +45,21 @@ get_stream_url() {
         fi
     fi
 
-    local url
-    url=$(yt-dlp --no-warnings -f "best[height<=1080]" -g \
-        "https://www.youtube.com/watch?v=${id}" 2>/dev/null | head -1) || url=""
+    # YouTube serves these live streams as separate video-only and audio-only
+    # HLS formats, so a combined "best" selector finds nothing. Only picture is
+    # needed: take the best video-only format, falling back to a combined one.
+    # -g prints one manifest URL per selected format; this selector picks one.
+    # Bounded by run_timeout like every other network call (see space-common.sh).
+    local url err="${STATE_DIR}/yt-dlp.err"
+    url=$(run_timeout 60 yt-dlp --no-warnings -f "bv*[height<=1080]/b[height<=1080]" -g \
+        "https://www.youtube.com/watch?v=${id}" 2>"$err" | head -1) || url=""
     if [ -n "$url" ]; then
         echo "$url" > "$cache"
         log "INFO: refreshed stream URL for ${SRC_ID}"
         echo "$url"
         return 0
     fi
+    log "WARN: ${SRC_ID}: yt-dlp: $(grep -m1 'ERROR' "$err" 2>/dev/null | cut -c1-200 || true)"
     return 1
 }
 
