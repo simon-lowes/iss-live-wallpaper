@@ -18,6 +18,8 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SELF_DIR}/space-sources.conf"
 # shellcheck source=space-common.sh
 source "${SELF_DIR}/space-common.sh"
+# shellcheck source=space-jev.sh
+source "${SELF_DIR}/space-jev.sh"
 
 LOOP_DURATION=30
 BRIGHTNESS_THRESHOLD=20
@@ -73,16 +75,27 @@ is_bright() {
     [ "$brightness" -gt "$BRIGHTNESS_THRESHOLD" ]
 }
 
+# Optional Jev content check on the encoded loop before it is swapped in
+# (see space-jev.sh). Returns 3 if the loop was rejected and discarded.
+swap_in() {
+    local tmp="$1" out="$2" rc=0
+    jev_gate "$tmp" || rc=$?
+    if [ "$rc" -eq 3 ]; then rm -f "$tmp"; return 3; fi
+    mv "$tmp" "$out"
+    jev_after_swap "$out" || true
+    return 0
+}
+
 encode_stream() {
     local url="$1" out="$2" tmp="${2}.tmp.mp4"
     if run_timeout 90 ffmpeg -i "$url" -t "$LOOP_DURATION" \
         -c:v h264_videotoolbox -b:v 2M -an -movflags +faststart "$tmp" -y 2>/dev/null; then
-        mv "$tmp" "$out"; return 0
+        swap_in "$tmp" "$out"; return
     fi
     log "WARN: VideoToolbox failed, falling back to software encoding"
     if run_timeout 90 ffmpeg -i "$url" -t "$LOOP_DURATION" \
         -c:v libx264 -crf 28 -preset fast -an -movflags +faststart "$tmp" -y 2>/dev/null; then
-        mv "$tmp" "$out"; return 0
+        swap_in "$tmp" "$out"; return
     fi
     rm -f "$tmp"; return 1
 }
@@ -97,11 +110,29 @@ capture_youtube() {
 
     if ! is_bright "$url"; then
         log "SKIP: ${SRC_ID}: night pass, keeping current loop"
+        # Optional 'best of today' (space-jev.sh): replace a dull loop with
+        # the day's best highlight. The toggle is only advanced if it worked.
+        if [ -s "$JEV_SCENIC_FILE" ]; then
+            local nt; nt=$(next_loop_target)
+            jev_night_rescue "$nt" || next_loop_target >/dev/null
+        fi
         return 2   # not a failure
     fi
 
-    if encode_stream "$url" "$(next_loop_target)"; then
-        return 0
+    # Pick the target first and keep the toggle in step if Jev rejects the loop,
+    # so the renderer's current file is never the one overwritten next time.
+    local target rc=0
+    target=$(next_loop_target)
+    encode_stream "$url" "$target" || rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    if [ "$rc" -eq 3 ]; then
+        next_loop_target >/dev/null   # undo the toggle
+        if jev_count_reject; then
+            log "ERROR: ${SRC_ID}: ${JEV_REJECTS_TO_FAIL} non-live loops in a row"
+            return 1
+        fi
+        log "SKIP: ${SRC_ID}: not a live Earth view, keeping current loop"
+        return 2
     fi
     rm -f "${STATE_DIR}/stream_url_${SRC_ID}"
     log "ERROR: ${SRC_ID}: capture failed, invalidated URL cache"
