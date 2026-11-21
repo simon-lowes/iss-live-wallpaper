@@ -580,6 +580,30 @@ winget uninstall rocksdanister.LivelyWallpaper
 
 ---
 
+## Optional: Jev frame gate (space/ version)
+
+`space/space-jev.sh` adds an optional content check to the space wallpaper's
+YouTube capture. It is **off** unless a TypeSafe AI key is set, either as
+`TYPESAFE_API_KEY` in the environment or in
+`~/.local/share/space-wallpaper/typesafe_api_key` (launchd jobs don't see your
+shell environment). `JEV_MODEL` overrides the model (default `jev-latest`).
+
+When on, each encoded 30 s loop has 3 frames (1 s, 15 s, 29 s, 640x360) sent to
+Jev, which answers: what the capture shows (live Earth view, slate, interior,
+studio/trailer, overlay, other), whether all frames are one continuous view,
+whether Earth's surface is visible, and a 0-4 scenic score. Code decides: the
+loop is swapped in only for a live view at >= 0.7 with both checks >= 0.6;
+otherwise it is discarded and the current loop keeps playing. From the 3rd
+non-live loop in a row each reject counts as a capture failure, so the usual
+`FAIL_THRESHOLD` failover moves to another source. Night skips never count.
+
+Loops scoring >= 3 are kept in `~/.local/share/space-wallpaper/highlights/`
+(top 6, last 24 hours). When a night pass starts while a loop scoring <= 1 is
+playing, the best highlight is shown instead. If Jev can't be reached or answers
+oddly, the brightness-only behaviour applies. Image input on Jev is experimental,
+so watch the log (`jev:` lines) for a day before trusting the failover path.
+Thresholds live at the top of `space/space-jev.sh`.
+
 ## Configuration
 
 Edit the capture script to change:
